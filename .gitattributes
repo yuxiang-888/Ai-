@@ -1,0 +1,29 @@
+# Normalize line endings on checkin; checkout uses platform-native endings.
+* text=auto
+
+# Windows scripts must keep CRLF or PowerShell / cmd may misparse them.
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Shell and Python sources keep LF for Linux/macOS contributors.
+*.sh   text eol=lf
+*.py   text eol=lf
+
+# Binary assets must never be normalized.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.mp4  binary
+*.mov  binary
+*.zip  binary
+*.gz   binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.sqlite binary
+*.sqlite3 binary
