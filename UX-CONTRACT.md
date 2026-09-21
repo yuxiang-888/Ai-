@@ -1,5 +1,12 @@
 # 服临 AI 剪辑台 UX 合同
 
+## 注册账号管理
+
+- `/accounts` 及 `/api/admin/users*` 仅管理员可访问，服务端权限检查是唯一可信边界；普通成员直接访问返回 403。
+- 账号列表来自 `users` 数据表，服务端分页，每页 20 条；支持邮箱或昵称搜索、300ms 防抖、IME 安全、过期请求取消以及明确的加载、空结果和错误状态。
+- 页面仅返回邮箱、昵称、角色、状态、注册时间和最近登录时间。`password_hash` 与原密码永不进入模板、API、日志或浏览器。
+- 管理员可设置新密码，但不能查看旧密码；重置使用应用内确认表单，至少 8 位，成功后原密码立即失效。
+
 ## Canonical UI Map
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |

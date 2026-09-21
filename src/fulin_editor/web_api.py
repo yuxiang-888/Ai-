@@ -32,7 +32,9 @@ from .accounts import (
     count_admins,
     ensure_schema as ensure_accounts_schema,
     get_user,
+    list_users,
     register_user,
+    reset_user_password,
 )
 from .agent_runtime import EditingAgent, LocalEditingTools, save_outcome
 from .db import describe as describe_database
@@ -271,6 +273,10 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ResetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 def current_user(request: Request) -> dict | None:
     """Resolve the signed-in account from the session."""
     user_id = request.session.get(AUTH_SESSION_KEY)
@@ -336,6 +342,42 @@ def _require_admin(request: Request) -> dict:
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="只有管理员可以修改和应用公司知识库")
     return user
+
+
+@app.get("/accounts", include_in_schema=False)
+def accounts_page(request: Request):
+    user = _require_admin(request)
+    return integrated_templates.TemplateResponse(
+        request=request,
+        name="accounts.html",
+        context={
+            "account_email": user["email"],
+            "account_name": user.get("display_name") or user["email"].split("@")[0],
+        },
+    )
+
+
+@app.get("/api/admin/users")
+def admin_list_users(
+    request: Request,
+    q: str = Query(default="", max_length=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+) -> dict:
+    _require_admin(request)
+    return list_users(query=q, page=page, page_size=page_size)
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+def admin_reset_password(user_id: str, payload: ResetPasswordRequest, request: Request) -> dict:
+    _require_admin(request)
+    try:
+        reset_user_password(user_id, payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "message": "密码已安全重置，原密码无法查看"}
 
 
 WEB_SCHEMA = """

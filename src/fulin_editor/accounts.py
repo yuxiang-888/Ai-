@@ -174,3 +174,61 @@ def get_user_by_email(email: str) -> dict | None:
             (normalize_email(email),),
         ).fetchone()
     return _public_user(dict(row)) if row else None
+
+
+def list_users(*, query: str = "", page: int = 1, page_size: int = 20) -> dict:
+    """Return a paginated administrator-safe account list.
+
+    Password hashes are deliberately never selected or returned.
+    """
+
+    ensure_schema()
+    page = max(1, int(page))
+    page_size = min(50, max(1, int(page_size)))
+    value = f"%{str(query or '').strip().lower()}%"
+    where = "WHERE lower(email) LIKE ? OR lower(display_name) LIKE ?" if query.strip() else ""
+    params: tuple[object, ...] = (value, value) if where else ()
+    with connect() as connection:
+        total_row = connection.execute(f"SELECT COUNT(*) AS total FROM users {where}", params).fetchone()
+        rows = connection.execute(
+            f"""
+            SELECT id, email, display_name, role, enabled, created_at, last_login_at
+            FROM users {where}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (*params, page_size, (page - 1) * page_size),
+        ).fetchall()
+    return {
+        "items": [
+            {
+                "id": row["id"],
+                "email": row["email"],
+                "display_name": row["display_name"],
+                "role": row["role"],
+                "enabled": bool(row["enabled"]),
+                "created_at": row["created_at"],
+                "last_login_at": row["last_login_at"],
+                "password_state": "已加密保存，不可查看",
+            }
+            for row in rows
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": int(total_row["total"] if total_row else 0),
+    }
+
+
+def reset_user_password(user_id: str, new_password: str) -> None:
+    """Replace a password hash without ever exposing the previous password."""
+
+    if len(new_password or "") < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"新密码至少 {MIN_PASSWORD_LENGTH} 位")
+    ensure_schema()
+    with connect() as connection:
+        cursor = connection.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (generate_password_hash(new_password), str(user_id or "")),
+        )
+        if cursor.rowcount != 1:
+            raise LookupError("账号不存在")
