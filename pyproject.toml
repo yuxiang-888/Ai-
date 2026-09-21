@@ -1,0 +1,35 @@
+[project]
+name = "fulin-video-editor"
+version = "0.1.0"
+description = "福州服临淘宝女装直播视频自动剪辑引擎"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography>=45,<49",
+  "fastapi>=0.116,<1",
+  "faster-whisper>=1.2,<2",
+  "httpx>=0.28,<1",
+  "itsdangerous>=2,<3",
+  "jinja2>=3.1,<4",
+  "mediapipe>=0.10",
+  "numpy>=2,<3",
+  "opencv-python>=4.10",
+  "python-multipart>=0.0.20,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "werkzeug>=3,<4",
+]
+
+[project.scripts]
+fulin-edit = "fulin_editor.cli:main"
+fulin-batch = "fulin_editor.batch_cli:main"
+fulin-web = "fulin_editor.web_api:main"
+fulin-agent = "fulin_editor.agent_cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,60 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+访问配置.json
+访客访问码.txt
+国内连接令牌.txt
+国内连接配置.yml
+国内连接.pid
+真实样片验收结果.json
+api.pid
+admin.pid
+tunnel.pid
+启动模式.txt
+演示入口说明.txt
+
+# Runtime databases, logs, caches, uploads, and generated videos
+data/
+output/
+outputs/
+tmp/
+release/
+.diagnostics/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.m4v
+*.webm
+
+# Downloaded model binaries are installed locally, not committed
+models/*.task
+models/**/*.bin
+
+# Frontend generated files
+web/node_modules/
+web/.next/
+web/.diagnostics/
+web/tsconfig.tsbuildinfo
+
+# Local audit output
+**/管理后台登录码.txt
+**/访问配置.json
+**/访客访问码.txt
+premium-audit.json
+premium-ui.json
+
+# Third-party recovery utility has its own repository and is not product source
+recovery/tools/

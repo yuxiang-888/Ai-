@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>AI 智能剪辑 | 登录</title>
+  <link rel="icon" type="image/x-icon" href="/static/desktop-brand.ico?v=20260912">
+  <link rel="apple-touch-icon" href="/static/desktop-brand.png?v=20260912">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/motion.css">
+</head>
+<body class="login-page">
+  <main class="auth-shell" aria-labelledby="login_title">
+    <section class="auth-showcase" aria-label="产品能力">
+      <div class="auth-orbit orbit-one" aria-hidden="true"></div><div class="auth-orbit orbit-two" aria-hidden="true"></div>
+      <div class="auth-showcase-copy">
+        <div class="auth-brand"><span class="auth-brand-mark" aria-hidden="true"><img src="/static/desktop-brand.png?v=20260912" alt="" width="42" height="42"></span><div><p class="eyebrow">SUCHEN</p><strong>AI 智能剪辑</strong></div></div>
+        <h2>让口播、动作与<br><em>剪辑标准</em>同时对齐。</h2>
+        <p>原视频进入后，由文字识别、模特动作判断、公司知识库和质量门共同生成可审核的成片。</p>
+        <div class="auth-flow" aria-label="剪辑流程">
+          <span><b>01</b>尺码识别</span><i></i><span><b>02</b>商品细节</span><i></i><span><b>03</b>背面转回</span>
+        </div>
+      </div>
+      <div class="auth-signal" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    </section>
+
+    <section class="login-card auth-card">
+      <div class="auth-mobile-brand"><span class="auth-brand-mark" aria-hidden="true"><img src="/static/desktop-brand.png?v=20260912" alt="" width="42" height="42"></span><strong>AI 智能剪辑</strong></div>
+      <p class="eyebrow">SECURE WORKSPACE</p>
+      <h1 id="login_title">进入 AI 智能剪辑</h1>
+      <p class="login-copy">账号、剪辑记录和公司知识库均保存在本机数据库中。</p>
+
+    <div class="auth-tabs" role="tablist" aria-label="账号操作">
+      <button type="button" role="tab" id="tab_login" aria-selected="true" class="is-active" onclick="window.suchenSetAuthMode('login')">登录</button>
+      <button type="button" role="tab" id="tab_register" aria-selected="false" onclick="window.suchenSetAuthMode('register')"{% if not signup_enabled %} disabled title="当前未开放注册"{% endif %}>注册</button>
+      <span class="auth-tab-indicator is-login" id="auth_tab_indicator" aria-hidden="true"></span>
+    </div>
+
+    {% if error %}<div class="login-error" role="alert">{{ error }}</div>{% endif %}
+    <div class="login-error" id="auth_error" role="alert" hidden></div>
+
+    <form id="auth_form" novalidate aria-describedby="auth_error">
+      <label for="login_email">工作邮箱
+        <input id="login_email" name="email" type="email" autocomplete="username" required autofocus>
+      </label>
+      <label for="login_display" id="login_display_label" hidden>昵称（可选）
+        <input id="login_display" name="display_name" type="text" autocomplete="nickname" placeholder="例如：运营小王">
+      </label>
+      <label for="login_password">密码
+        <span class="password-field"><input id="login_password" name="password" type="password" autocomplete="current-password" required><button type="button" class="password-toggle" data-password-target="login_password" aria-label="显示密码" onclick="window.suchenTogglePassword(this)">显示</button></span>
+        <small id="password_hint" class="login-hint" hidden>至少 8 位</small>
+      </label>
+      <label for="login_password_confirm" id="login_password_confirm_label" hidden>确认密码
+        <span class="password-field"><input id="login_password_confirm" name="password_confirm" type="password" autocomplete="new-password"><button type="button" class="password-toggle" data-password-target="login_password_confirm" aria-label="显示确认密码" onclick="window.suchenTogglePassword(this)">显示</button></span>
+      </label>
+      <button class="button primary full auth-submit" id="auth_submit" type="submit">登录并进入工作区</button>
+    </form>
+
+    <p class="login-plan">{% if first_account %}首次注册账号将成为系统管理员{% else %}福州服临电子商务有限公司 · 内部工作台{% endif %}</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var mode = "login";
+      var form = document.getElementById("auth_form");
+      var errorBox = document.getElementById("auth_error");
+      var emailInput = document.getElementById("login_email");
+      var passwordInput = document.getElementById("login_password");
+      var displayLabel = document.getElementById("login_display_label");
+      var displayInput = document.getElementById("login_display");
+      var confirmLabel = document.getElementById("login_password_confirm_label");
+      var confirmInput = document.getElementById("login_password_confirm");
+      var hint = document.getElementById("password_hint");
+      var submit = document.getElementById("auth_submit");
+      var indicator = document.getElementById("auth_tab_indicator");
+      var tabLogin = document.getElementById("tab_login");
+      var tabRegister = document.getElementById("tab_register");
+
+      function setMode(next) {
+        mode = next;
+        var isRegister = mode === "register";
+        tabLogin.classList.toggle("is-active", !isRegister);
+        tabRegister.classList.toggle("is-active", isRegister);
+        tabLogin.setAttribute("aria-selected", String(!isRegister));
+        tabRegister.setAttribute("aria-selected", String(isRegister));
+        indicator.className = "auth-tab-indicator is-" + mode;
+        displayLabel.hidden = !isRegister;
+        confirmLabel.hidden = !isRegister;
+        confirmInput.required = isRegister;
+        if (!isRegister) confirmInput.value = "";
+        hint.hidden = !isRegister;
+        passwordInput.autocomplete = isRegister ? "new-password" : "current-password";
+        passwordInput.minLength = isRegister ? 8 : 0;
+        submit.textContent = isRegister ? "注册并进入工作区" : "登录并进入工作区";
+        errorBox.hidden = true;
+      }
+
+      window.suchenSetAuthMode = setMode;
+      window.suchenTogglePassword = function (button) {
+        var input = document.getElementById(button.dataset.passwordTarget);
+        var showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        button.textContent = showing ? "显示" : "隐藏";
+        button.setAttribute("aria-label", showing ? "显示密码" : "隐藏密码");
+      };
+
+      function showError(message) {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+        errorBox.classList.remove("shake");
+        void errorBox.offsetWidth;
+        errorBox.classList.add("shake");
+      }
+
+      function destination() {
+        var params = new URLSearchParams(window.location.search);
+        var next = params.get("next");
+        return next && next.indexOf("/") === 0 && next.indexOf("//") !== 0 ? next : "/";
+      }
+
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        errorBox.hidden = true;
+        var payload = {
+          email: emailInput.value.trim(),
+          password: passwordInput.value
+        };
+        if (mode === "register") {
+          payload.display_name = displayInput.value.trim();
+        }
+        if (!payload.email || !payload.password) {
+          showError("请填写邮箱和密码");
+          return;
+        }
+        if (!/^\S+@\S+\.\S+$/.test(payload.email)) {
+          showError("请输入有效的工作邮箱");
+          emailInput.focus();
+          return;
+        }
+        if (mode === "register" && payload.password.length < 8) {
+          showError("密码至少需要 8 位");
+          passwordInput.focus();
+          return;
+        }
+        if (mode === "register" && payload.password !== confirmInput.value) {
+          showError("两次输入的密码不一致");
+          confirmInput.focus();
+          return;
+        }
+        submit.disabled = true;
+        var original = submit.textContent;
+        submit.textContent = mode === "register" ? "注册中…" : "登录中…";
+        try {
+          var path = mode === "register" ? "/api/auth/register" : "/api/auth/login";
+          var response = await fetch(path, {
+            method: "POST",
+            signal: AbortSignal.timeout(15000),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          var data = {};
+          try { data = await response.json(); } catch (error) { data = {}; }
+          if (!response.ok) {
+            showError(data.detail || "操作失败，请重试");
+            submit.disabled = false;
+            submit.textContent = original;
+            return;
+          }
+          if (mode === "register") {
+            // A fresh account can sign in immediately.
+            var loginResponse = await fetch("/api/auth/login", {
+              method: "POST",
+              signal: AbortSignal.timeout(15000),
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: payload.email, password: payload.password })
+            });
+            if (!loginResponse.ok) {
+              setMode("login");
+              showError("注册成功，请登录");
+              submit.disabled = false;
+              submit.textContent = original;
+              return;
+            }
+          }
+          window.location.href = destination();
+        } catch (error) {
+          showError("网络异常，请检查服务后重试");
+          submit.disabled = false;
+          submit.textContent = original;
+        }
+      });
+
+      setMode("login");
+    })();
+  </script>
+</body>
+</html>

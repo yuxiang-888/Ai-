@@ -1,0 +1,12 @@
+# Cloud deployment only. The free host serves accounts, the knowledge base and
+# job metadata; video rendering stays on the local SOCHEN engine, so the heavy
+# vision dependencies (mediapipe / opencv / faster-whisper) are not installed.
+fastapi>=0.116,<1
+cryptography>=45,<49
+httpx>=0.28,<1
+itsdangerous>=2,<3
+jinja2>=3.1,<4
+psycopg[binary]>=3.1,<4
+python-multipart>=0.0.20,<1
+uvicorn[standard]>=0.35,<1
+werkzeug>=3,<4

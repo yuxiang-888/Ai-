@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AI 智能剪辑</title>
+  <link rel="icon" type="image/x-icon" href="/static/desktop-brand.ico?v=20260912">
+  <link rel="apple-touch-icon" href="/static/desktop-brand.png?v=20260912">
+  <link rel="stylesheet" href="/static/app.css?v=desktop-brand-20260912-1">
+  <link rel="stylesheet" href="/static/motion.css">
+</head>
+<body data-account-role="{{ account_role }}" data-can-manage-knowledge="{{ 'true' if can_manage_knowledge else 'false' }}">
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/?view=workspace" aria-label="返回首页：AI 智能剪辑工作台">
+        <span class="brand-mark"><img src="/static/desktop-brand.png?v=20260912" alt="" width="34" height="34"></span>
+        <span class="brand-copy"><strong>AI 智能剪辑</strong><small>SUCHEN · AI VIDEO AGENT</small></span>
+      </a>
+
+      <div class="project-title">
+        <strong>服装主图自动剪辑</strong>
+        <span>{% if cloud_mode %}阿里云后端 · 中文转写 · Pose 动作质检{% else %}1080×1440 · 30FPS · 1.0x · 主播原声{% endif %}</span>
+      </div>
+
+      <nav class="top-nav" aria-label="主导航">
+        <a class="active" id="nav_workspace" href="?view=workspace" data-screen="workspace" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18M8 3v6m8 0v6m-8 0v6"/></svg>剪辑工作台</a>
+        <a id="nav_memory" href="?view=memory" data-screen="memory"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 4h6M9 20h6M5 9V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2M5 15v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M8 9h8v6H8z"/></svg>AI 剪辑记忆</a>
+        <a id="nav_knowledge" href="?view=knowledge" data-screen="knowledge"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5zm16 0A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5z"/></svg>知识库</a>
+      </nav>
+
+      <div class="top-actions">
+        <span class="worker-state" id="worker_health"><i></i> AGENT CHECKING</span>
+        {% if auth_enabled %}<div class="account-chip" title="{{ account_email }}"><span aria-hidden="true">{{ account_name[:1] | upper }}</span><b>{{ account_name }}</b><small>{{ '管理员' if account_role == 'admin' else '成员' }}</small></div><form id="return_auth_form" method="post" action="/logout" novalidate><button class="button secondary return-auth-button" type="submit" title="退出当前账号并返回登录、注册界面"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5m5 5H3m10-9h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg>返回登录 / 注册</button></form>{% endif %}
+        <button class="button secondary workspace-action" id="btn_save_text" type="button" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5zM8 3v6h8V4M8 21v-7h8v7"/></svg>保存文字</button>
+        <button class="button secondary accent workspace-action" id="btn_ai_current" type="button" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg>Agent 剪辑当前视频</button>
+        <button class="button danger ghost workspace-action" id="btn_stop" type="button" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10"/></svg>停止</button>
+        <button class="button primary workspace-action" id="btn_ai" type="button" onclick="startBatch()"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>批量 Agent 剪辑</button>
+      </div>
+    </header>
+
+    <div class="connection-banner" id="connection_banner" role="status" aria-live="polite" hidden>
+      <span><strong id="connection_banner_title">服务连接中断</strong><small id="connection_banner_copy">页面会保留当前内容，恢复连接后可继续操作。</small></span>
+      <button class="button warning compact-button" id="connection_retry" type="button" onclick="reconnectWorkspace()">重新连接</button>
+    </div>
+
+    <div class="app-body">
+      <aside class="library-panel" id="asset-section">
+        <div class="panel-heading library-heading">
+          <div><span class="eyebrow">MEDIA</span><h1>{% if cloud_mode %}云端素材{% else %}本地素材{% endif %}</h1></div>
+          <span class="count-badge" id="media_count">0</span>
+        </div>
+
+        <div class="library-estimate" aria-live="polite">
+          <span><small>预计剪辑总时长</small><strong id="estimated_processing_time_top">导入素材后计算</strong></span>
+          <span><small>预计成片总时长</small><strong id="estimated_output_duration_top">导入素材后计算</strong></span>
+        </div>
+
+        <div class="folder-control">
+          {% if not cloud_mode %}<label for="folder">素材目录</label>
+          <div class="input-action">
+            <input id="folder" type="text" autocomplete="off" placeholder="选择本地视频文件夹">
+            <button class="icon-button" id="btn_pick" type="button" title="填写素材目录" onclick="pickMediaFolder()">…</button>
+          </div>
+          {% else %}<input id="folder" type="hidden" value="">{% endif %}
+          <div class="import-actions">
+            {% if not cloud_mode %}
+            <button class="button secondary full" id="btn_import" type="button" onclick="loadMedia(document.getElementById('folder').value)">＋ 导入目录</button>
+            {% endif %}
+            <input id="upload_files" type="file" accept="video/*" multiple hidden>
+            <button class="button secondary full" id="btn_upload" type="button" onclick="document.getElementById('upload_files').click()">↥ 上传视频</button>
+            <input id="upload_folder" type="file" accept="video/*" webkitdirectory directory multiple hidden>
+            <button class="button secondary full folder-upload-button" id="btn_upload_folder" type="button" onclick="document.getElementById('upload_folder').click()">▣ {{ "上传素材文件夹" if cloud_mode else "导入未剪辑文件夹" }}</button>
+          </div>
+          <div class="upload-status" id="upload_status" aria-live="polite">{% if cloud_mode %}素材加密上传至云端工作区，识别与渲染仅在后端执行{% else %}可选择整个文件夹，自动筛选视频并批量导入{% endif %}</div>
+        </div>
+
+        <div class="library-tools">
+          <label class="search-box" for="asset_search"><span aria-hidden="true">⌕</span><input id="asset_search" type="search" placeholder="搜索素材"><button class="search-clear" id="asset_search_clear" type="button" aria-label="清除素材搜索" onclick="clearAssetSearch()" hidden>×</button></label>
+          <div class="segmented compact" id="asset_filters">
+            <button class="active" type="button" data-filter="all" onclick="setAssetFilter(this.dataset.filter)">全部</button>
+            <button type="button" data-filter="pending" onclick="setAssetFilter(this.dataset.filter)">待处理</button>
+            <button type="button" data-filter="done" onclick="setAssetFilter(this.dataset.filter)">已完成</button>
+            <button type="button" data-filter="review" onclick="setAssetFilter(this.dataset.filter)">有告警</button>
+            <button type="button" data-filter="failed" onclick="setAssetFilter(this.dataset.filter)">失败</button>
+          </div>
+        </div>
+
+        <div class="asset-list" id="media_list" aria-live="polite"></div>
+        <div class="library-footer">
+          <span><i class="status-dot ready"></i><b id="queue_ready">0</b> 待处理</span>
+          <span><i class="status-dot done"></i><b id="queue_done">0</b> 已完成</span>
+        </div>
+        <button class="library-clear-button" id="btn_clear_media" type="button" disabled title="删除当前列表的原视频、成片和旧剪辑方案；不会自动剪辑"><span aria-hidden="true">×</span> 一键删除</button>
+      </aside>
+
+      <main class="workspace" id="workspace">
+        <section class="viewer-panel" aria-label="视频预览">
+          <div class="viewer-toolbar">
+            <div class="selected-file">
+              <span class="selected-type">MP4</span>
+              <span><strong id="selected_name">未选择素材</strong><small id="selected_meta">从左侧选择视频</small></span>
+            </div>
+            <div class="view-switch segmented" id="view_switch">
+              <button class="active" type="button" data-view="source" onclick="setPreviewView(this.dataset.view)">原片</button>
+              <button type="button" data-view="output" onclick="setPreviewView(this.dataset.view)" disabled>AI 成片</button>
+            </div>
+            <span class="qa-badge neutral" id="preview_qa">未质检</span>
+            <button class="icon-button" id="btn_download" type="button" title="下载当前成片" aria-label="下载当前成片" disabled>⇩</button>
+          </div>
+
+          <div class="viewer-stage">
+            <div class="preview-canvas" id="preview_canvas">
+              <video id="preview_video" controls preload="metadata" playsinline hidden></video>
+              <div class="viewer-empty" id="preview_empty">
+                <span class="empty-frame">3:4</span><strong>等待选择素材</strong><small>MP4 / MOV / MKV / AVI</small>
+              </div>
+              <span class="preview-spec">1080×1440 · 3:4</span>
+            </div>
+            <span class="preview-version" id="preview_tag" hidden>原片</span>
+          </div>
+
+          <div class="viewer-footer">
+            <div class="stage-flow" id="stage_flow">
+              <span class="flow-step">全身正面</span><i>›</i><span class="flow-step">尺码信息</span><i>›</i>
+              <span class="flow-step">商品细节</span><i>›</i><span class="flow-step">背面展示</span><i>›</i>
+              <span class="flow-step">正面回位</span>
+            </div>
+            <span class="source-time" id="source_time">--:-- / --:--</span>
+          </div>
+        </section>
+
+        <section class="edit-dock" id="timeline-section">
+          <div class="dock-tabs" role="tablist">
+            <button class="active" type="button" data-dock="transcript" onclick="setActiveDock(this.dataset.dock)">文字剪辑</button>
+            <button type="button" data-dock="timeline" onclick="setActiveDock(this.dataset.dock)">时间轴</button>
+            <span class="dock-summary" id="transcript_summary">选择素材后读取口播</span>
+            <div class="dock-actions">
+              <button class="button secondary compact-button" id="btn_transcribe" type="button" disabled>识别口播</button>
+              <button class="button secondary compact-button" id="btn_restore_text" type="button" disabled>恢复识别文字</button>
+            </div>
+          </div>
+
+          <div class="dock-panel transcript-panel active" id="dock_transcript">
+            <div class="transcript-head">
+              <span>参与 AI</span><span>源片时间</span><span>可编辑口播文字</span>
+            </div>
+            <div class="transcript-list" id="transcript_list">
+              <div class="transcript-empty"><strong>尚未选择素材</strong><span>AI 会按逐句文字、时间戳与人物动作共同规划剪辑。</span></div>
+            </div>
+          </div>
+
+          <div class="dock-panel timeline-panel" id="dock_timeline">
+            <div class="timeline-heading">
+              <div><strong>智能剪辑时间轴</strong><span id="tl_total">尚未生成剪辑计划</span></div>
+              <div class="timeline-tools"><span id="tl_clip_count">0 个保留区间</span><button class="icon-button small" id="zoom_out" type="button" aria-label="缩小时间轴" onclick="setTimelineZoom(-8)">−</button><button class="icon-button small" id="zoom_in" type="button" aria-label="放大时间轴" onclick="setTimelineZoom(8)">＋</button></div>
+            </div>
+            <div class="timeline-scroll" id="timeline_scroll">
+              <div class="timeline-ruler-row"><div class="track-label">时间</div><div class="track-lane"><div class="lane-content ruler" id="timeline_ruler"></div></div></div>
+              <div class="track-row"><div class="track-label">成片结构</div><div class="track-lane"><div class="lane-content" id="lane_video"></div></div></div>
+              <div class="track-row"><div class="track-label">口播语义</div><div class="track-lane"><div class="lane-content" id="lane_semantic"></div></div></div>
+              <div class="track-row"><div class="track-label">主播原声</div><div class="track-lane"><div class="lane-content" id="lane_audio"></div></div></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="inspector" id="inspector">
+        <div class="panel-heading inspector-heading">
+          <div><span class="eyebrow">AI EDIT</span><h2>智能剪辑</h2></div>
+          <span class="run-state idle" id="run_state"><i></i> 空闲</span>
+        </div>
+
+        <section class="inspector-section ai-launch-section">
+          <div class="agent-mode-banner"><span class="agent-mode-pulse"></span><div><strong>真实 Agent 模式</strong><small>自主分析 → 制定计划 → 验证 → 渲染 → 质检 → 最多自动修正 2 轮</small></div><em>默认</em></div>
+          <div class="ai-launch-copy"><strong>每条原片生成独立、有证据的剪辑计划</strong><small>证据不足或两轮仍不合格会停止并进入人工复核，不伪造成功。</small></div>
+          <button class="button primary full large-button" id="btn_ai_side" type="button" onclick="startBatch()">▶ 批量 Agent 剪辑</button>
+        </section>
+
+        <section class="inspector-section">
+          <div class="section-title"><strong>成片设置</strong><span>按商品类型执行</span></div>
+          <div class="form-field"><label for="output">{{ "云端输出工作区" if cloud_mode else "输出目录" }}</label><input id="output" type="text" value="{{ default_output }}" {% if cloud_mode %}readonly{% endif %} placeholder="默认保存到 文档\\suchen\\成品"></div>
+          <div class="form-field product-type-field">
+            <label for="product_type">商品类型（可覆盖 AI 自动识别）</label>
+            <select id="product_type">
+              <option value="auto" selected>自动识别商品类型</option>
+              <option value="single">单品及小件 · 30 秒以内</option>
+              <option value="set">上下套装及两件套 · 60 秒以内</option>
+              <option value="bulky">皮草 / 羽绒 / 派克 / 双面呢 · 约 120 秒</option>
+            </select>
+            <small id="product_profile_hint">AI 将读取中文口播与画面，逐条选择对应时长标准。</small>
+          </div>
+          <div class="duration-rule"><span>当前成片标准</span><strong id="duration_profile_range">AI 自动 · 3–120 秒</strong></div>
+          <div class="duration-inputs">
+            <label><input id="min_sec" type="number" value="3" min="3" max="120" readonly aria-label="成片最短秒数"><span>秒</span></label><i>至</i>
+            <label><input id="max_sec" type="number" value="120" min="3" max="120" readonly aria-label="成片最长秒数"><span>秒</span></label>
+          </div>
+          <label class="target-duration" for="target_sec"><span id="target_duration_label">AI 识别后确定单条目标</span><span class="target-duration-input"><input id="target_sec" type="number" min="3" max="120" step="1" value="25" disabled><em>秒</em></span></label>
+          <div class="locked-specs">
+            <span><small>清晰度</small><strong>1080P</strong><em>1080×1440</em></span>
+            <span><small>速度</small><strong>1.0x</strong><em>30FPS</em></span>
+            <span><small>声音</small><strong>原声</strong><em>无字幕音乐</em></span>
+          </div>
+          <div class="hidden-settings" aria-hidden="true">
+          <div class="segmented wide" id="tpl_seg"><span class="active">主图版</span></div>
+            <select id="model"><option value="small" selected>Small</option></select>
+            <input id="pending_only" type="checkbox" checked><input id="auto_preview" type="checkbox" checked>
+          </div>
+          <label class="switch-row" for="quality"><span><strong>自动质量门</strong><small>画幅、原声、时长、黑帧、闪退与景别突变</small></span><input id="quality" type="checkbox" checked><i></i></label>
+        </section>
+
+        <section class="inspector-section batch-budget-section">
+          <div class="section-title"><strong>批次预计</strong><span>每条目标 1–2 分钟</span></div>
+          <div class="batch-budget"><span><small>预计成片总时长</small><strong id="estimated_output_duration">导入素材后计算</strong></span><span><small>预计处理时间</small><strong id="estimated_processing_time">导入素材后计算</strong></span><span class="estimated-finish"><small>预计完成时间</small><strong id="estimated_finish_time">导入素材后计算</strong></span></div>
+          <p class="section-help">按顺序处理，超过 200 条仍保留完整动作和质量门，不为提速跳过识别。</p>
+        </section>
+
+        <section class="inspector-section action-editor-section">
+          <div class="section-title"><strong>人物动作模板</strong><span id="action_template_state">本机已保存</span></div>
+          <p class="section-help">面料与尺码由内容合同硬保留；正面开场与后背展示作为动作建议。黑帧、闪现、闪退和景别突变质量门始终锁定。</p>
+          <div class="action-template-toolbar">
+            <label class="template-name-field" for="action_template_name"><span>模板名称</span><input id="action_template_name" type="text" value="我的动作模板" maxlength="80"></label>
+            <label class="template-preset-field" for="action_template_preset"><span>快速预设</span><select id="action_template_preset"><option value="custom">自定义</option><option value="standard">标准主图</option><option value="steady">站定讲解</option><option value="detail">弱化背面</option></select></label>
+          </div>
+          <div class="action-rule-list" id="action_rule_list">
+            <label class="action-rule-row"><span><b>01</b><strong>开场全身正面</strong><small>有稳定主图时优先保留</small></span><select id="action_opening_full_front" data-action-role="opening_full_front"><option value="required">必须</option><option value="optional" selected>建议</option><option value="off">关闭</option></select></label>
+            <label class="action-rule-row"><span><b>02</b><strong>原位尺码介绍</strong><small>尺码内容保留，不限制人物站位</small></span><select id="action_origin_size_intro" data-action-role="origin_size_intro"><option value="required">必须</option><option value="optional">建议</option><option value="off" selected>关闭</option></select></label>
+            <label class="action-rule-row"><span><b>03</b><strong>走近中央介绍商品</strong><small>有完整走近内容时再保留</small></span><select id="action_move_to_center_product_detail" data-action-role="move_to_center_product_detail"><option value="required">必须</option><option value="optional">建议</option><option value="off" selected>关闭</option></select></label>
+            <label class="action-rule-row"><span><b>04</b><strong>背面全身展示</strong><small>优先保留工艺、转身与后背</small></span><select id="action_back_full_body_show" data-action-role="back_full_body_show"><option value="required">必须</option><option value="optional" selected>建议</option><option value="off">关闭</option></select></label>
+            <label class="action-rule-row"><span><b>05</b><strong>转回正面并回位</strong><small>不再作为每条成片硬性条件</small></span><select id="action_return_origin_front_finish" data-action-role="return_origin_front_finish"><option value="required">必须</option><option value="optional">建议</option><option value="off" selected>关闭</option></select></label>
+          </div>
+          <div class="action-timing-grid">
+            <label><span>开场最长</span><span><input id="opening_max_sec" type="number" min="0.5" max="3" step="0.1" value="1.5"><em>秒</em></span></label>
+            <label><span>走近预留</span><span><input id="approach_preroll_sec" type="number" min="0.25" max="2.5" step="0.05" value="0.75"><em>秒</em></span></label>
+            <label><span>背面最短</span><span><input id="back_min_duration_sec" type="number" min="0.3" max="4" step="0.1" value="0.6"><em>秒</em></span></label>
+            <label><span>回位稳定</span><span><input id="return_stable_sec" type="number" min="0.5" max="4" step="0.1" value="1.0"><em>秒</em></span></label>
+          </div>
+          <div class="action-template-actions">
+            <button class="button primary" id="btn_action_save" type="button" onclick="saveActionTemplate().catch((error) => toast(error.message, 'error'))">保存模板</button>
+            <button class="button secondary" id="btn_action_apply" type="button" onclick="applyActionTemplateToBatch()">应用到当前批次</button>
+            <button class="button secondary" id="btn_action_reset" type="button" onclick="resetActionTemplate()">恢复标准</button>
+          </div>
+          <div class="action-template-note" id="action_template_note">修改后点击“应用到当前批次”，本次 AI 剪辑会使用这些规则。</div>
+          <div class="continuity-lock"><span>锁</span><div><strong>无闪现保护强制开启</strong><small>动作中段不切断，剪点需通过姿态、低动作与真实像素差检查。</small></div></div>
+          <div class="continuity-lock security-lock"><span>盾</span><div><strong>本机数据保护已开启</strong><small>仅监听本机、服务端验证上传、限制请求频率；反爬和防病毒不能靠前端开关绕过。</small></div></div>
+        </section>
+
+        <section class="inspector-section agent-section">
+          <div class="section-title"><strong>Agent 证据与决策</strong><span id="agent_version">{{ "云端运行" if cloud_mode else "本地离线" }}</span></div>
+          <div class="agent-health" id="agent_health"><span class="agent-health-dot"></span><div><strong>正在检查模型</strong><small>Pose / ASR / FFmpeg</small></div></div>
+          <div class="agent-decision" id="agent_decision"><div class="decision-head"><strong>等待剪辑计划</strong><span>--</span></div><small>生成后显示动作覆盖与剪点风险</small></div>
+          <div class="agent-stages" id="agent_stages"></div>
+          <div class="agent-runtime-trace" id="agent_runtime_trace" aria-live="polite"><span>RECEIVED</span><i></i><span>ANALYZING</span><i></i><span>PLANNING</span><i></i><span>VALIDATING</span><i></i><span>RENDERING</span><i></i><span>EVALUATING</span></div>
+          <div class="cut-risk-panel" id="cut_risk_panel"><div class="cut-risk-empty">生成后检查硬剪点是否造成肢体闪现</div></div>
+          <div class="qa-summary" id="qa_summary"><span class="qa-icon neutral">?</span><span><strong>等待剪辑结果</strong><small>完成后显示质量门结论</small></span></div>
+          <span id="qa_count" hidden>0 项</span><div class="qa-issues" id="qa_issues"></div>
+        </section>
+
+        <section class="inspector-section review-section" id="review_section">
+          <div class="section-title"><strong>人工复核与 AI 记忆</strong><span class="review-state neutral" id="review_state">未复核</span></div>
+          <p class="section-help" id="review_help">选择已生成成片的素材后，可告诉 AI 这次结果是否符合标准。</p>
+          <form class="review-form" id="review_form" novalidate>
+            <div class="review-fields">
+              <label for="review_score"><span>人工评分</span><select id="review_score"><option value="">未评分</option><option value="5">5 · 完全符合</option><option value="4">4 · 基本符合</option><option value="3">3 · 需小改</option><option value="2">2 · 问题较多</option><option value="1">1 · 不可用</option></select></label>
+              <label for="review_note"><span>复核备注</span><textarea class="resize-none" id="review_note" rows="3" maxlength="1000" placeholder="例：尺码和面料完整，背面过渡符合标准"></textarea></label>
+            </div>
+            <div class="review-error" id="review_error" role="alert" hidden></div>
+            <div class="review-actions" aria-label="成片复核结果">
+              <button class="button success" type="submit" data-review-status="approved">认可成片</button>
+              <button class="button warning" type="submit" data-review-status="needs_review">待调整</button>
+              <button class="button danger ghost" type="submit" data-review-status="rejected">不采纳</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="inspector-section task-section">
+          <div class="section-title"><strong>任务进度</strong><span id="task_counter">0 / 0</span></div>
+          <div class="phase-pipeline" id="phase_pipeline"><span>识别</span><i></i><span>规划</span><i></i><span>渲染</span><i></i><span>质检</span></div>
+          <div class="progress-track"><span id="progress_bar"></span></div>
+          <div class="progress-meta"><strong id="pct">0%</strong><span id="status">等待任务</span></div>
+          <div class="task-live" id="task_live"><span class="task-spinner"></span><div><strong id="task_phase">待机</strong><small id="task_message">全自动任务在后台静默运行</small></div></div>
+          <div class="task-grid"><span><small>当前素材</small><strong id="task_current">--</strong></span><span><small>阶段</small><strong id="task_result">--</strong></span></div>
+        </section>
+
+        <section class="inspector-section export-section">
+          <button class="button secondary full" id="btn_export" type="button" disabled>⇩ 导出剪映草稿</button>
+          <button class="button secondary full" id="btn_log" type="button" onclick="setLogOpen(true)">查看运行日志</button>
+          <div class="result-message" id="results_line"></div>
+        </section>
+      </aside>
+    </div>
+
+    <main class="memory-page" id="memory_page" hidden aria-labelledby="memory_title">
+      <section class="memory-hero">
+        <div>
+          <span class="eyebrow">LEARNING MEMORY</span>
+          <h1 id="memory_title">AI 剪辑记忆</h1>
+          <p>只让人工认可或真正通过质量门的非兜底成片影响下一次剪辑。</p>
+        </div>
+        <div class="memory-actions">
+          <button class="button secondary" id="btn_memory_refresh" type="button" onclick="loadMemory()">刷新数据</button>
+          <button class="button primary" id="btn_memory_sync" type="button" onclick="loadMemory({ sync: true })">同步历史报告</button>
+        </div>
+      </section>
+
+      <div class="memory-status" id="memory_status" role="status" aria-live="polite">
+        <span class="memory-status-dot"></span>
+        <span><strong>正在连接剪辑记忆</strong><small>等待后端数据库响应</small></span>
+      </div>
+
+      <section class="memory-gate" aria-labelledby="memory_gate_title">
+        <div class="memory-gate-heading">
+          <div><span class="eyebrow">MEMORY GATE</span><h2 id="memory_gate_title">记忆门轨道</h2></div>
+          <span id="memory_updated_at">尚未读取</span>
+        </div>
+        <div class="memory-track" aria-label="剪辑记忆学习流程">
+          <div class="memory-node source"><span>01</span><div><small>历史成片</small><strong id="memory_runs">--</strong><em>每次剪辑全量记录</em></div></div>
+          <i aria-hidden="true"></i>
+          <div class="memory-node gate"><span>02</span><div><small>质检 / 人工门</small><strong id="memory_held">--</strong><em>不合格和兜底样本隔离</em></div></div>
+          <i aria-hidden="true"></i>
+          <div class="memory-node learned"><span>03</span><div><small>安全学习池</small><strong id="memory_eligible">--</strong><em>用于下次规划</em></div></div>
+        </div>
+        <div class="memory-ledger">
+          <span><small>兜底隔离</small><strong id="memory_fallback">--</strong></span>
+          <span><small>质量门通过</small><strong id="memory_quality">--</strong></span>
+          <span><small>人工认可</small><strong id="memory_approved">--</strong></span>
+          <span><small>待调整 / 不采纳</small><strong id="memory_restricted">--</strong></span>
+          <span><small>重剪代次记录</small><strong id="memory_reedits">--</strong></span>
+        </div>
+      </section>
+
+      <section class="memory-profiles" aria-labelledby="memory_profiles_title">
+        <div class="memory-section-heading"><div><span class="eyebrow">PLANNER PROFILES</span><h2 id="memory_profiles_title">当前规划器学到的标准</h2></div><span>中位数抗异常值</span></div>
+        <div class="profile-strips" id="memory_profiles"><div class="memory-loading"><span></span>正在读取规划样本…</div></div>
+      </section>
+
+      <section class="memory-history" aria-labelledby="memory_history_title">
+        <div class="memory-section-heading"><div><span class="eyebrow">RECENT RUNS</span><h2 id="memory_history_title">最近 30 条剪辑记录</h2></div><span id="memory_history_count">等待数据</span></div>
+        <div class="memory-table-wrap" id="memory_table_wrap">
+          <div class="memory-loading"><span></span>正在读取剪辑历史…</div>
+        </div>
+      </section>
+    </main>
+
+    <main class="knowledge-page" id="knowledge_page" hidden aria-labelledby="knowledge_title">
+      <section class="knowledge-hero">
+        <div>
+          <span class="eyebrow">COMPANY KNOWLEDGE</span>
+          <h1 id="knowledge_title">剪辑知识库</h1>
+          <p>管理尺码、面料、口播删减、模特动作与连续性标准。启用的系统规则会在剪辑前同步给 SOCHEN 原引擎。</p>
+        </div>
+        <div class="knowledge-actions">
+          <span class="knowledge-updated" id="knowledge_updated" role="status">等待同步</span>
+          <a class="button secondary" href="/?view=workspace" data-screen="workspace" id="knowledge_home">返回剪辑工作台</a>
+          <button class="button secondary" id="btn_knowledge_refresh" type="button" onclick="loadKnowledge({ quiet: true })">刷新知识</button>
+          <button class="button primary" id="btn_knowledge_apply" type="button"{% if not can_manage_knowledge %} disabled title="只有管理员可以应用公司规则"{% endif %}>应用到剪辑引擎</button>
+        </div>
+      </section>
+
+      <section class="knowledge-system" aria-label="智能识别系统状态">
+        <div><i id="knowledge_engine_dot"></i><span><small>原剪辑引擎</small><strong id="knowledge_engine_state">连接中</strong></span></div>
+        <div><i id="knowledge_asr_dot"></i><span><small>文字抓取</small><strong id="knowledge_asr_state">检测中</strong></span></div>
+        <div><i id="knowledge_pose_dot"></i><span><small>人体识别</small><strong id="knowledge_pose_state">检测中</strong></span></div>
+        <div><i id="knowledge_fusion_dot"></i><span><small>联合剪辑</small><strong id="knowledge_fusion_state">检测中</strong></span></div>
+        <div><i id="knowledge_db_dot"></i><span><small>知识数据库</small><strong id="knowledge_db_state">检测中</strong></span></div>
+        <div><i id="knowledge_duration_dot"></i><span><small>成片上限</small><strong id="knowledge_duration_state">读取中</strong></span></div>
+      </section>
+
+      <div class="knowledge-layout">
+        <aside class="knowledge-editor">
+          <div class="knowledge-panel-heading"><span class="eyebrow" id="knowledge_editor_eyebrow">NEW KNOWLEDGE</span><h2 id="knowledge_editor_title">添加公司标准</h2></div>
+          <form id="knowledge_form"{% if not can_manage_knowledge %} class="is-readonly" aria-describedby="knowledge_readonly_note"{% endif %} novalidate>
+            {% if not can_manage_knowledge %}<p class="knowledge-readonly-note" id="knowledge_readonly_note">当前为成员账号，可查看规则；只有管理员可以新增、编辑、停用和应用规则。</p>{% endif %}
+            <label for="knowledge_category"><span>分类</span><select id="knowledge_category" required><option value="editing_sop">剪辑 SOP</option><option value="body_action">模特动作</option><option value="spoken_content">口播内容</option><option value="quality_gate">质量门</option><option value="product_rule">商品类型</option></select></label>
+            <label for="knowledge_entry_title"><span>标题</span><input id="knowledge_entry_title" type="text" maxlength="100" placeholder="例：双面呢必保内容" aria-describedby="knowledge_form_error" required></label>
+            <label for="knowledge_entry_content"><span>规则内容</span><textarea class="resize-none" id="knowledge_entry_content" rows="7" maxlength="4000" placeholder="说明什么内容必须保留、什么可以删除，以及需要匹配的模特动作。" aria-describedby="knowledge_form_error" required></textarea></label>
+            <label for="knowledge_priority"><span>优先级</span><input id="knowledge_priority" type="number" min="0" max="100" value="50"></label>
+            <p class="knowledge-form-error" id="knowledge_form_error" role="alert" hidden></p>
+          <button class="button primary full large-button" id="btn_knowledge_save" type="submit"{% if not can_manage_knowledge %} disabled title="只有管理员可以修改知识库"{% endif %}>保存到知识库</button>
+            <button class="button secondary full" id="btn_knowledge_cancel_edit" type="button" onclick="resetKnowledgeForm({ focus: true })" hidden>取消编辑</button>
+          </form>
+          <div class="knowledge-contract">
+            <small>当前生产合同</small>
+            <strong id="knowledge_contract_count">-- 条规则启用</strong>
+            <p>单品 ≤30s · 套装 ≤60s · 大货 ≤120s<br>原速原声 · 无字幕音乐 · 无闪现</p>
+          </div>
+        </aside>
+
+        <section class="knowledge-library" aria-labelledby="knowledge_library_title">
+          <div class="knowledge-toolbar">
+            <div><span class="eyebrow">KNOWLEDGE ENTRIES</span><h2 id="knowledge_library_title">公司剪辑规则</h2><small id="knowledge_result_count">等待数据</small></div>
+            <label class="knowledge-search" for="knowledge_search"><span aria-hidden="true">⌕</span><input id="knowledge_search" type="search" placeholder="搜索尺码、面料、动作或质量标准"><button id="knowledge_search_clear" type="button" aria-label="清除知识搜索" onclick="clearKnowledgeSearch()" hidden>×</button></label>
+            <select id="knowledge_filter" aria-label="按知识分类筛选"><option value="all">全部分类</option><option value="editing_sop">剪辑 SOP</option><option value="body_action">模特动作</option><option value="spoken_content">口播内容</option><option value="quality_gate">质量门</option><option value="product_rule">商品类型</option></select>
+            <select id="knowledge_enabled_filter" aria-label="按启用状态筛选"><option value="all">全部状态</option><option value="true">已启用</option><option value="false">已停用</option></select>
+          </div>
+          <p class="knowledge-scroll-hint">规则列表可上下滚动 · 每 15 秒自动同步 · 下方可翻页</p>
+          <div class="knowledge-list" id="knowledge_list" role="region" aria-label="可滚动的公司剪辑规则" tabindex="0" aria-busy="true"><div class="memory-loading"><span></span>正在读取知识库…</div></div>
+          <footer class="knowledge-pagination" aria-label="知识库分页">
+            <button class="button secondary compact-button" id="knowledge_prev" type="button" onclick="changeKnowledgePage(-1)">上一页</button>
+            <span id="knowledge_page_state">第 1 / 1 页</span>
+            <button class="button secondary compact-button" id="knowledge_next" type="button" onclick="changeKnowledgePage(1)">下一页</button>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="log-drawer" id="log_drawer" aria-hidden="true">
+    <div class="log-header"><span><i></i> 后台运行日志</span><div><button class="icon-button small" id="log_clear" type="button" aria-label="清空运行日志" onclick="clearRunLog()">×</button><button class="icon-button small" id="log_close" type="button" aria-label="收起运行日志" onclick="setLogOpen(false)">⌄</button></div></div>
+    <pre id="log"></pre>
+  </div>
+
+  <div class="app-dialog" id="app_dialog" role="dialog" aria-modal="true" aria-labelledby="app_dialog_title" aria-describedby="app_dialog_description" hidden>
+    <div class="dialog-backdrop" data-dialog-cancel></div>
+    <div class="dialog-surface" role="document">
+      <div class="dialog-heading"><span class="eyebrow">SUCHEN</span><h2 id="app_dialog_title">请确认</h2></div>
+      <p id="app_dialog_description"></p>
+      <label class="dialog-input-field" id="app_dialog_input_field" for="app_dialog_input" hidden><span id="app_dialog_input_label">路径</span><input id="app_dialog_input" type="text" autocomplete="off"></label>
+      <div class="dialog-actions"><button class="button secondary" id="app_dialog_cancel" type="button" onclick="closeAppDialog(false)">取消</button><button class="button danger" id="app_dialog_confirm" type="button" onclick="submitAppDialog()">确认</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js?v=return-auth-20260913-2"></script>
+  <script src="/static/motion.js?v=20260912-1"></script>
+</body>
+</html>
