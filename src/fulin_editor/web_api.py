@@ -35,8 +35,9 @@ from .accounts import (
     list_users,
     register_user,
     reset_user_password,
+    update_user_access,
 )
-from .agent_runtime import EditingAgent, LocalEditingTools, save_outcome
+from .agent_runtime import EditingAgent, LocalEditingTools, save_outcome, RULE_VERSION as AGENT_RULE_VERSION
 from .db import describe as describe_database
 from .legacy_engine import LEGACY_PROFILES, SuchenEngineClient, run_suchen_edit
 from .policies import POLICIES, RequestedProductType, policy_catalog
@@ -168,6 +169,8 @@ async def protect_public_api(request: Request, call_next):
                     return JSONResponse({"detail": "跨站请求已拒绝"}, status_code=403)
 
     response = await call_next(request)
+    if request.url.path.startswith("/api/") or request.url.path == "/accounts":
+        response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
@@ -277,6 +280,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class UserAccessRequest(BaseModel):
+    role: Literal["admin", "member"] | None = None
+    enabled: bool | None = None
+
+
 def current_user(request: Request) -> dict | None:
     """Resolve the signed-in account from the session."""
     user_id = request.session.get(AUTH_SESSION_KEY)
@@ -368,6 +376,23 @@ def admin_list_users(
     return list_users(query=q, page=page, page_size=page_size)
 
 
+@app.get("/api/admin/operations")
+def admin_operations(request: Request) -> dict:
+    _require_admin(request)
+    _ensure_schema()
+    tables = {"users": "注册账号", "web_jobs": "剪辑任务", "knowledge_entries": "知识库条目",
+              "agent_runs": "Agent运行记录", "human_feedback": "人工反馈"}
+    connection = _connect()
+    try:
+        counts = [{"name": label, "count": connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]}
+                  for table, label in tables.items()]
+    finally:
+        connection.close()
+    return {"database": "主机统一数据库 · 已连接", "records": counts, "components": _installed_engine_checks(),
+            "data_mode": "central_host", "checked_at": _utc_now(),
+            "rule_version": AGENT_RULE_VERSION}
+
+
 @app.post("/api/admin/users/{user_id}/reset-password")
 def admin_reset_password(user_id: str, payload: ResetPasswordRequest, request: Request) -> dict:
     _require_admin(request)
@@ -378,6 +403,22 @@ def admin_reset_password(user_id: str, payload: ResetPasswordRequest, request: R
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"ok": True, "message": "密码已安全重置，原密码无法查看"}
+
+
+@app.patch("/api/admin/users/{user_id}/access")
+def admin_update_access(user_id: str, payload: UserAccessRequest, request: Request) -> dict:
+    actor = _require_admin(request)
+    if payload.role is None and payload.enabled is None:
+        raise HTTPException(status_code=422, detail="请指定需要修改的权限或账号状态")
+    try:
+        user = update_user_access(
+            user_id, role=payload.role, enabled=payload.enabled, actor_user_id=actor.get("id", "")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "user": user, "message": "账号权限已更新"}
 
 
 WEB_SCHEMA = """
@@ -759,7 +800,6 @@ def _update_job(job_id: str, **values: object) -> None:
         connection.close()
 
 
-AGENT_RULE_VERSION = "taobao-women-v3-2026-09-21"
 AGENT_STATE_BY_STAGE = {
     "queued": "RECEIVED",
     "transcribing": "ANALYZING",

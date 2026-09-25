@@ -52,6 +52,46 @@ class VisionAnalysis:
     def between(self, start: float, end: float) -> list[FrameObservation]:
         return [item for item in self.observations if start <= item.time <= end]
 
+    def action_sequence_evidence(
+        self, size_end: float, detail_start: float, detail_end: float,
+        back_start: float, back_end: float,
+    ) -> dict[str, float | bool]:
+        """Require observed approach, retreat, back, then front in source order."""
+        anchor = [x.bbox_height for x in self.between(max(0, size_end - 3), size_end)
+                  if x.detected and x.full_body >= .6]
+        if len(anchor) < 2:
+            return {"complete": False, "reason": "原位身形基准不足"}
+        baseline = median(anchor)
+        anchor_center = median(x.center_x for x in self.between(max(0, size_end - 3), size_end)
+                               if x.detected and x.full_body >= .6)
+        detail = [x for x in self.between(detail_start, detail_end) if x.detected]
+        near = [x for x in detail if x.time >= size_end and
+                x.bbox_height >= baseline + .10]
+        close = next((x for x, y in zip(near, near[1:])
+                      if .3 <= y.time - x.time <= 1.1), None)
+        far = [x for x in detail if close and x.time >= close.time + 2.0 and
+               x.bbox_height <= baseline + .05 and
+               abs(x.center_x - anchor_center) <= .08]
+        returned = next((x for x, y in zip(far, far[1:])
+                         if .3 <= y.time - x.time <= 1.1), None)
+        back = [x for x in self.between(back_start, back_end) if x.detected]
+        back_frames = [x for x in back if x.back_likelihood >= .5]
+        back_peak = back_frames[0] if len(back_frames) >= 2 else None
+        front_frames = [x for x in back if back_peak and x.time > back_frames[-1].time and
+                        x.back_likelihood <= .18 and
+                        abs(x.bbox_height - baseline) <= .12]
+        complete = bool(close and returned and back_peak and len(front_frames) >= 2
+                        and returned.time <= back_peak.time)
+        return {
+            "complete": complete,
+            "baseline_height": round(baseline, 3),
+            "approach_time": close.time if close else -1.0,
+            "retreat_time": returned.time if returned else -1.0,
+            "back_time": back_peak.time if back_peak else -1.0,
+            "front_time": front_frames[0].time if len(front_frames) >= 2 else -1.0,
+            "reason": "动作顺序缺失或人物检测不足" if not complete else "",
+        }
+
     def interval_evidence(self, start: float, end: float, stage: str) -> dict[str, float]:
         frames = self.between(start, end)
         detected = [item for item in frames if item.detected]
@@ -270,10 +310,17 @@ def analyze_video(
         with vision.PoseLandmarker.create_from_options(options) as detector:
             frame_index = 0
             while True:
-                ok, bgr = capture.read()
+                # Decode sampled frames only; grab advances the compressed stream
+                # without converting every intermediate frame to a full BGR image.
+                sampled = frame_index % frame_step == 0
+                if sampled:
+                    ok, bgr = capture.read()
+                else:
+                    ok = capture.grab()
+                    bgr = None
                 if not ok:
                     break
-                if frame_index % frame_step:
+                if not sampled:
                     frame_index += 1
                     continue
                 timestamp = frame_index / source_fps

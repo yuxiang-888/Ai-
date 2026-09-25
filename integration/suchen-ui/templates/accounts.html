@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="robots" content="noindex, nofollow">
-  <title>AI 智能剪辑 | 注册账号管理</title>
+  <title>AI 智能剪辑 | 负责人后台</title>
   <link rel="icon" type="image/x-icon" href="/static/desktop-brand.ico?v=20260912">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/accounts.css">
@@ -26,12 +26,18 @@
 
     <main class="accounts-main">
       <section class="accounts-hero">
-        <div><span class="eyebrow">REGISTERED ACCOUNTS</span><h1>注册账号管理</h1><p>查看每个已注册邮箱、账号状态与登录记录。密码始终加密保存，只能重置，不能查看。</p></div>
+        <div><span class="eyebrow">OWNER OPERATIONS</span><h1>负责人运维与账号权限</h1><p>查看注册邮箱、登录记录与账号状态；按需授权负责人权限或停用客户账号。密码始终加密保存，只能重置。</p></div>
         <div class="accounts-owner"><small>当前负责人</small><strong>{{ account_name }}</strong><span>{{ account_email }}</span></div>
       </section>
 
       <section class="accounts-security" role="note">
         <span aria-hidden="true">盾</span><div><strong>密码数据库安全保护</strong><p>数据库只保存不可逆密码哈希。页面和接口均不会返回原密码或密码哈希，管理员只能设置新密码。</p></div>
+      </section>
+
+      <section class="accounts-panel" aria-labelledby="operations_title">
+        <header class="accounts-toolbar"><div><h2 id="operations_title">数据库与运行状态</h2><small>仅负责人可查看，数据来自当前运行中的AI智能剪辑。</small></div><a class="button secondary" href="/?view=knowledge">进入知识库</a></header>
+        <div class="accounts-status" id="operations_status" role="status" aria-live="polite">正在读取运行状态…</div>
+        <div class="accounts-table-wrap"><table class="accounts-table"><thead><tr><th>数据类型</th><th>记录数量</th></tr></thead><tbody id="operations_rows"></tbody></table></div>
       </section>
 
       <section class="accounts-panel" aria-labelledby="accounts_table_title">
@@ -63,6 +69,16 @@
         <div class="account-form-error" id="password_error" role="alert" hidden></div>
         <div class="dialog-actions"><button class="button secondary" type="button" data-close-dialog>取消</button><button class="button warning" id="password_submit" type="submit">确认重置密码</button></div>
       </form>
+    </section>
+  </div>
+
+  <div class="account-dialog" id="access_dialog" role="alertdialog" aria-modal="true" aria-labelledby="access_dialog_title" aria-describedby="access_dialog_copy" hidden>
+    <div class="dialog-backdrop" data-close-access></div>
+    <section class="dialog-surface">
+      <div class="dialog-heading"><span class="eyebrow">PERMISSION CHANGE</span><h2 id="access_dialog_title">确认权限变更</h2></div>
+      <p id="access_dialog_copy"></p>
+      <div class="account-form-error" id="access_error" role="alert" hidden></div>
+      <div class="dialog-actions"><button class="button secondary" id="access_cancel" type="button" data-close-access>取消</button><button class="button warning" id="access_submit" type="button">确认变更</button></div>
     </section>
   </div>
 </body>

@@ -79,6 +79,7 @@ def _visual_integrity(video: Path) -> dict[str, Any]:
         raise RuntimeError(f"质量检查无法打开成片：{video}")
     decoded_frames = 0
     black_frames = 0
+    overexposed_frames = 0
     flashes = 0
     ignored_pose_jumps = 0
     diff_total = 0.0
@@ -97,6 +98,7 @@ def _visual_integrity(video: Path) -> dict[str, Any]:
             small = cv2.resize(gray, (96, 128), interpolation=cv2.INTER_AREA)
             decoded_frames += 1
             black_frames += float(small.mean()) < 5.0
+            overexposed_frames += float((small >= 250).mean()) > 0.95
             if previous is not None:
                 difference = float(np.mean(cv2.absdiff(previous, small)))
                 diff_total += difference
@@ -134,6 +136,7 @@ def _visual_integrity(video: Path) -> dict[str, Any]:
     return {
         "decoded_frames": decoded_frames,
         "black_frames": black_frames,
+        "overexposed_frames": overexposed_frames,
         "single_frame_flashes": flashes,
         "same_shot_pose_jumps_ignored": ignored_pose_jumps,
         "longest_near_freeze_frames": longest_freeze,
@@ -190,8 +193,11 @@ def inspect_output(
     elif plan.stages[0].duration > 1.05:
         issues.append(QualityIssue("opening_too_long", "全身正面开场超过 1 秒"))
     integrity = _visual_integrity(path)
-    if integrity["decoded_frames"] < 3:
+    expected_frames = media["duration"] * media["fps"]
+    if integrity["decoded_frames"] < max(3, expected_frames - max(3, expected_frames * .02)):
         issues.append(QualityIssue("decode_failure", "成片无法完整解码"))
+    if integrity.get("overexposed_frames", 0):
+        issues.append(QualityIssue("overexposure", "检测到整帧严重过曝，需要复核"))
     if integrity["black_frames"]:
         issues.append(
             QualityIssue("black_frame", f"检测到 {integrity['black_frames']} 个近黑帧")
@@ -208,7 +214,7 @@ def inspect_output(
             QualityIssue(
                 "possible_freeze",
                 "检测到超过1秒的近似冻结画面",
-                severity="warn",
+                severity="block",
             )
         )
     passed = not any(issue.severity == "block" for issue in issues)

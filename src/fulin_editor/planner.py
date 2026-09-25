@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -71,13 +72,16 @@ class EditPlan:
 
 
 SIZE_RE = re.compile(
-    r"尺码|码数|体重|穿到|适合|加\s*10\s*斤|\d{2,3}\s*斤|(?:^|[^A-Za-z])[SMLX]{1,3}(?:号|码|\d|[^A-Za-z]|$)",
+    r"均码|尺码|码数|体重|穿到|加\s*10\s*斤|\d{2,3}\s*斤|(?:^|[^A-Za-z])[SMLX]{1,3}(?:号|码|\d|[^A-Za-z]|$)",
     re.IGNORECASE,
 )
 DETAIL_RE = re.compile(
     r"品牌|面料|材质|弹力|微弹|颜色|色调|版型|衣型|裤型|裙型|扣子|拉链|口袋|里衬|底衬|工艺|成分|长度|厚度|光泽|垂感|纹理|线条|保暖|蓬松|走线"
 )
 BACK_RE = re.compile(r"后面|后背|背面|背后的|转身|转到后")
+FABRIC_RE = re.compile(r"面料|材质|成分|纯棉|棉质|羊毛|羊绒|真丝|涤纶|聚酯|粘纤|氨纶|亚麻|牛仔|雪纺|针织|双面呢|羽绒|弹力|垂感")
+COLOR_RE = re.compile(r"(?:黑|白|灰|红|蓝|绿|黄|紫|粉|米白|卡其|咖啡|藏青|酒红|杏|驼)色")
+WASTE_RE = re.compile(r"找链接|等一下|稍等|上链接|点关注|扣个一")
 RETURN_RE = re.compile(r"转回来|转回|回正|正面|转过来|一圈过来|回到原位|收尾")
 
 
@@ -110,7 +114,7 @@ def _size_score(text: str) -> float:
 
 
 def _detail_score(text: str) -> float:
-    return len(DETAIL_RE.findall(text)) * 2.5
+    return len(DETAIL_RE.findall(text)) * 2.5 + len(FABRIC_RE.findall(text)) * 5.0
 
 
 def _back_score(text: str) -> float:
@@ -133,12 +137,15 @@ def _best_window(
     preferred: re.Pattern[str] | None = None,
     stage: str,
     vision: Any | None = None,
-) -> tuple[int, int, float, dict[str, float]]:
+    ranked: bool = False,
+    rank_limit: int = 64,
+) -> tuple[int, int, float, dict[str, float]] | list[tuple[int, int, float, dict[str, float]]]:
     best: tuple[float, int, int, float, dict[str, float]] | None = None
+    candidates = []
     for start_index, first in enumerate(sentences):
         if first.start + 0.05 < start_after:
             continue
-        if stage != "back_return" and scorer(first.text) <= 0:
+        if stage == "size" and scorer(first.text) <= 0:
             continue
         for end_index in range(start_index, len(sentences)):
             selected = sentences[start_index : end_index + 1]
@@ -194,15 +201,59 @@ def _best_window(
                 + speech_confidence
                 - abs(duration - target) * 0.9
                 - gap * 0.35
+                - len(WASTE_RE.findall(text)) * 8.0
+                - (len(selected) - len({re.sub(r'\W', '', s.text) for s in selected})) * 6.0
             )
             candidate = (score, start_index, end_index, duration, visual)
+            candidates.append(candidate)
             if best is None or candidate[0] > best[0]:
                 best = candidate
     if best is None:
         raise ValueError(
             f"找不到满足时长 {minimum:.1f}～{maximum:.1f} 秒且位于 {start_after:.2f} 秒之后的候选片段"
         )
+    if ranked:
+        return [(c[1], c[2], c[0], c[4]) for c in sorted(candidates, key=lambda c: -c[0])[:rank_limit]]
     return best[1], best[2], best[0], best[4]
+
+
+def _joint_windows(sentences, policy, target, vision):
+    """Bounded search; do not let a late high-scoring detail consume the ending."""
+    common = dict(sentences=sentences, start_after=0, vision=vision, ranked=True)
+    sizes = _best_window(**common, scorer=_size_score, minimum=policy.size_minimum,
+                         maximum=policy.size_maximum, target=6, required=SIZE_RE, stage="size")
+    details = _best_window(**common, scorer=_detail_score, minimum=policy.detail_minimum,
+                           maximum=policy.detail_maximum, target=8, required=FABRIC_RE, stage="detail",
+                           rank_limit=256)
+    backs = _best_window(**common, scorer=_back_score, minimum=policy.back_minimum,
+                         maximum=policy.back_maximum, target=8, required=BACK_RE,
+                         preferred=RETURN_RE, stage="back_return")
+    best = None
+    action_check = getattr(vision, "action_sequence_evidence", None)
+    for size in sizes:
+        for detail in details:
+            if sentences[detail[0]].start < sentences[size[1]].end:
+                continue
+            for back in backs:
+                if sentences[back[0]].start < sentences[detail[1]].end:
+                    continue
+                if policy.key == "single" and action_check is not None:
+                    motion = action_check(
+                        sentences[size[1]].end,
+                        sentences[detail[0]].start, sentences[detail[1]].end,
+                        sentences[back[0]].start, sentences[back[1]].end,
+                    )
+                    if not motion.get("complete", False):
+                        continue
+                duration = sum(sentences[c[1]].end - sentences[c[0]].start for c in (size, detail, back))
+                if not policy.minimum_duration <= duration <= policy.maximum_duration:
+                    continue
+                score = sum(c[2] for c in (size, detail, back)) - abs(duration - target)
+                if best is None or score > best[0]:
+                    best = (score, (size, detail, back))
+    if best is None:
+        raise ValueError("候选片段无法同时满足尺码、面料、背面顺序和品类时长；需要人工复核")
+    return best[1]
 
 
 def _make_stage(
@@ -227,12 +278,75 @@ def _make_stage(
         center_y=float(visual.get("center_y", 0.5)),
         scale=float(visual.get("scale", 1.0)),
         visual_confidence=round(float(visual.get("detected_ratio", 0.0)), 3),
-        evidence=tuple(
+        evidence=(f"asr_sentences={start_index}:{end_index}",
+                  f"source_interval={selected[0].start:.3f}:{selected[-1].end:.3f}") + tuple(
             f"{key}={float(value):.2f}"
             for key, value in visual.items()
             if key not in {"center_x", "center_y", "scale"}
         ),
     )
+
+
+def _split_single_action_stages(
+    sentences: list[Sentence], detail: Stage, back: Stage,
+    action: dict[str, Any], vision: Any,
+) -> tuple[Stage, Stage, Stage, Stage, Stage]:
+    """Keep short evidence-backed speech around each action, not the whole close-up."""
+    detail_lines = [s for s in sentences if detail.start <= s.start and s.end <= detail.end]
+    back_lines = [s for s in sentences if back.start <= s.start and s.end <= back.end]
+    approach_time = float(action["approach_time"])
+    retreat_time = float(action["retreat_time"])
+    back_time = float(action["back_time"])
+    front_time = float(action["front_time"])
+    approach_end = next((s.end for s in detail_lines if s.end >= approach_time + .4), None)
+    retreat_start = next((s.start for s in detail_lines if s.start <= retreat_time < s.end), None)
+    if approach_end is None or retreat_start is None or approach_end >= retreat_start:
+        raise ValueError("无法在完整口播边界拆分走近和退回动作；需要人工复核")
+    pitch_options = []
+    for i, first in enumerate(detail_lines):
+        if first.start < approach_end or first.start >= retreat_start:
+            continue
+        for last in detail_lines[i:]:
+            if last.end > retreat_start:
+                break
+            duration = last.end - first.start
+            if duration > 5.0:
+                break
+            text = _window_text(s for s in detail_lines if first.start <= s.start and s.end <= last.end)
+            if 3.0 <= duration <= 5.0 and FABRIC_RE.search(text):
+                coverage = vision.interval_evidence(first.start, last.end, "detail").get(
+                    "detected_ratio", 0.0
+                )
+                pitch_options.append((len(FABRIC_RE.findall(text)) * 5 + len(DETAIL_RE.findall(text)) * 2
+                                      + coverage * 20 - abs(duration - 4), first.start, last.end))
+    if not pitch_options:
+        raise ValueError("找不到 3–5 秒且包含完整面料口播的近景卖点；需要人工复核")
+    _, pitch_start, pitch_end = max(pitch_options)
+    back_split = next((s.end for s in reversed(back_lines) if s.end >= back_time and
+                       s.end <= front_time and s.end > back.start), None)
+    if back_split is None:
+        raise ValueError("背面与转正无法在完整口播边界拆分；需要人工复核")
+    # The actual front must remain in the second piece, not just at its cut point.
+    if front_time >= back.end or back.end - back_split < .5:
+        raise ValueError("缺少原地转回正面的完整收尾；需要人工复核")
+    spans = (
+        ("approach", "走近镜头", detail.start, approach_end),
+        ("pitch", "近景卖点", pitch_start, pitch_end),
+        ("retreat", "退回原位", retreat_start, detail.end),
+        ("back", "转身展示背面", back.start, back_split),
+        ("return_front", "原地转回正面", back_split, back.end),
+    )
+    result = []
+    for name, label, start, end in spans:
+        if end <= start:
+            raise ValueError(f"{label}没有有效时长；需要人工复核")
+        selected = [s for s in sentences if start <= s.start and s.end <= end]
+        visual = vision.interval_evidence(start, end, name)
+        result.append(Stage(name, label, start, end, _window_text(selected), detail.confidence,
+                            visual.get("center_x", .5), visual.get("center_y", .5),
+                            visual.get("scale", 1.0), visual.get("detected_ratio", 0.0),
+                            (f"source_interval={start:.3f}:{end:.3f}",)))
+    return tuple(result)
 
 
 def build_plan(
@@ -247,34 +361,10 @@ def build_plan(
     effective_target = float(target_duration or policy.target_duration)
     effective_target = min(policy.maximum_duration, max(policy.minimum_duration, effective_target))
     warnings: list[str] = []
-    missing_size = False
-    try:
-        size_i, size_j, size_score, size_visual = _best_window(
-            sentences,
-            scorer=_size_score,
-            start_after=0.0,
-            minimum=policy.size_minimum,
-            maximum=policy.size_maximum,
-            target=(policy.size_minimum + policy.size_maximum) / 2.0,
-            required=SIZE_RE,
-            stage="size",
-            vision=vision,
-        )
-    except ValueError:
-        missing_size = True
-        size_i, size_j, size_score, size_visual = _best_window(
-            sentences,
-            scorer=lambda _text: 1.0,
-            start_after=0.0,
-            minimum=policy.size_minimum,
-            maximum=policy.size_maximum,
-            target=policy.size_minimum,
-            stage="size",
-            vision=vision,
-        )
-        warnings.append("没有识别到可靠尺码口播，已用原位全身开场替代；不得自动发布")
+    joint_size, joint_detail, joint_back = _joint_windows(sentences, policy, effective_target, vision)
+    size_i, size_j, size_score, size_visual = joint_size
     full_size_stage = _make_stage(
-        "size", "尺码介绍" if not missing_size else "原位全身起势", sentences, size_i, size_j, size_score, size_visual
+        "size", "尺码介绍", sentences, size_i, size_j, size_score, size_visual
     )
     opening_duration = min(1.0, max(0.5, full_size_stage.duration / 3.0))
     opening_stage = Stage(
@@ -304,57 +394,45 @@ def build_plan(
         evidence=full_size_stage.evidence,
     )
 
-    detail_i, detail_j, detail_score, detail_visual = _best_window(
-        sentences,
-        scorer=_detail_score,
-        start_after=full_size_stage.end - 0.001,
-        minimum=policy.detail_minimum,
-        maximum=policy.detail_maximum,
-        target=min(policy.detail_maximum, max(policy.detail_minimum, effective_target * 0.58)),
-        required=DETAIL_RE,
-        stage="detail",
-        vision=vision,
-    )
+    detail_i, detail_j, detail_score, detail_visual = joint_detail
     detail_stage = _make_stage(
         "detail", "商品与细节", sentences, detail_i, detail_j, detail_score, detail_visual
     )
 
-    remaining_capacity = policy.maximum_duration - full_size_stage.duration - detail_stage.duration
-    remaining_max = min(policy.back_maximum, remaining_capacity)
-    if remaining_max < policy.back_minimum:
-        raise ValueError(
-            f"{policy.label} 的尺码与细节片段占用过长，无法保留完整背面转回动作"
-        )
-    remaining_target = max(
-        policy.back_minimum,
-        min(remaining_max, effective_target - full_size_stage.duration - detail_stage.duration),
-    )
-    back_i, back_j, back_score, back_visual = _best_window(
-        sentences,
-        scorer=_back_score,
-        start_after=detail_stage.end - 0.001,
-        minimum=policy.back_minimum,
-        maximum=remaining_max,
-        target=remaining_target,
-        required=BACK_RE,
-        preferred=RETURN_RE,
-        stage="back_return",
-        vision=vision,
-    )
+    back_i, back_j, back_score, back_visual = joint_back
     back_stage = _make_stage(
         "back_return", "背面展示与转回", sentences, back_i, back_j, back_score, back_visual
     )
 
-    if not RETURN_RE.search(back_stage.text) and back_visual.get("turn_cycle", 0.0) < 0.42:
+    action_check = getattr(vision, "action_sequence_evidence", None)
+    action = (action_check(size_stage.end, detail_stage.start, detail_stage.end,
+                           back_stage.start, back_stage.end) if action_check else {})
+    if action.get("complete"):
+        detail_stage = Stage(**{**asdict(detail_stage), "evidence": detail_stage.evidence + (
+            f"approach_time={action['approach_time']:.3f}",
+            f"retreat_time={action['retreat_time']:.3f}",
+        )})
+        back_stage = Stage(**{**asdict(back_stage), "evidence": back_stage.evidence + (
+            f"back_time={action['back_time']:.3f}",
+            f"front_time={action['front_time']:.3f}",
+        )})
+    if not action.get("complete") and not RETURN_RE.search(back_stage.text) and back_visual.get("turn_cycle", 0.0) < 0.42:
         warnings.append("背面阶段未从口播或姿态中确认完整转回，必须人工复核")
     if vision is None:
         warnings.append("未执行人物姿态分析，构图与背面动作必须人工复核")
     elif min(size_stage.visual_confidence, back_stage.visual_confidence) < 0.55:
         warnings.append("部分阶段人物检测覆盖率不足，必须人工复核构图")
+    if vision is not None and detail_stage.visual_confidence < 0.5:
+        warnings.append("走近及商品细节阶段人物检测中断，必须人工复核动作连续性")
     if size_visual.get("full_body", 0.0) < 0.62:
         warnings.append("首秒没有高置信全身画面，主图必须人工复核")
+    stages: tuple[Stage, ...] = (opening_stage, size_stage, detail_stage, back_stage)
+    if policy.key == "single" and action.get("complete") and vision is not None:
+        stages = (opening_stage, size_stage) + _split_single_action_stages(
+            sentences, detail_stage, back_stage, action, vision
+        )
     plan = EditPlan(
-        stages=(opening_stage, size_stage, detail_stage, back_stage),
+        stages=stages,
         target_duration=effective_target,
         product_type=policy.key,
         product_label=policy.label,
@@ -368,15 +446,21 @@ def build_plan(
 
 
 def validate_plan(plan: EditPlan) -> None:
+    for stage in plan.stages:
+        if not all(math.isfinite(t) for t in (stage.start, stage.end)) or stage.start < 0 or stage.end <= stage.start:
+            raise ValueError("阶段时间戳必须有限、非负且结束晚于开始")
     expected = ("opening", "size", "detail", "back_return")
+    expanded = ("opening", "size", "approach", "pitch", "retreat", "back", "return_front")
     actual = tuple(stage.name for stage in plan.stages)
-    if actual != expected:
+    if actual not in (expected, expanded):
         raise ValueError(f"阶段顺序错误：{actual}")
-    opening, size, _detail, _back = plan.stages
+    opening, size = plan.stages[:2]
+    if actual == expanded and not 3.0 <= plan.stages[3].duration <= 5.0:
+        raise ValueError("近景卖点讲解必须控制在 3–5 秒")
     if not 0.5 <= opening.duration <= 1.05:
         raise ValueError(f"首秒全身阶段时长不合格：{opening.duration:.2f} 秒")
-    if plan.product_type == "single" and not 5.0 <= opening.duration + size.duration <= 8.0:
-        raise ValueError(f"尺码阶段总时长不合格：{opening.duration + size.duration:.2f} 秒")
+    if opening.duration + size.duration <= 0:
+        raise ValueError("尺码阶段没有有效时长")
     if not plan.minimum_duration <= plan.duration <= plan.maximum_duration:
         raise ValueError(
             f"{plan.product_label} 成片时长 {plan.duration:.2f} 秒，不在 "
@@ -385,3 +469,54 @@ def validate_plan(plan: EditPlan) -> None:
     for left, right in zip(plan.stages, plan.stages[1:]):
         if right.start < left.end - 0.001:
             raise ValueError(f"源时间轴重叠：{left.name} 与 {right.name}")
+
+
+def evidence_failures(plan: EditPlan, sentences: list[Sentence], vision: Any) -> list[str]:
+    """Check source evidence before render; contiguous stages are one speech interval."""
+    failures = list(plan.warnings)
+    intervals: list[list[float]] = []
+    for stage in plan.stages:
+        if intervals and abs(intervals[-1][1] - stage.start) < 0.001:
+            intervals[-1][1] = stage.end
+        else:
+            intervals.append([stage.start, stage.end])
+    kept = [s for s in sentences if any(a <= s.start + .001 and b >= s.end - .001 for a, b in intervals)]
+    for a, b in intervals:
+        if any(s.start + .001 < boundary < s.end - .001 for s in sentences for boundary in (a, b)):
+            failures.append(f"口播句子被切断：{a:.3f}–{b:.3f}")
+    text = _window_text(kept)
+    if not SIZE_RE.search(text):
+        failures.append("缺少完整尺码或均码讲解")
+    if not FABRIC_RE.search(text):
+        failures.append("缺少完整面料讲解")
+    missing = set(COLOR_RE.findall(_window_text(sentences))) - set(COLOR_RE.findall(text))
+    if missing:
+        failures.append("未覆盖原片口播颜色：" + "、".join(sorted(missing)))
+    if vision is None:
+        failures.append("缺少人物动作证据")
+    else:
+        opening = plan.stages[0]
+        evidence = vision.interval_evidence(opening.start, opening.end, "opening")
+        if any(evidence.get(key, 0) < limit for key, limit in (("full_body", .62), ("front", .65), ("stability", .6), ("detected_ratio", .55))):
+            failures.append("实际首秒未确认稳定全身正面")
+        action_check = getattr(vision, "action_sequence_evidence", None)
+        if plan.product_type == "single" and action_check is not None:
+            stages = {stage.name: stage for stage in plan.stages}
+            if "approach" in stages:
+                size, approach, retreat, back, front = (
+                    stages[key] for key in ("size", "approach", "retreat", "back", "return_front")
+                )
+                action = action_check(size.end, approach.start, retreat.end, back.start, front.end)
+                if action.get("complete") and not (
+                    approach.start <= action["approach_time"] <= approach.end
+                    and retreat.start <= action["retreat_time"] <= retreat.end
+                    and back.start <= action["back_time"] <= back.end
+                    and front.start <= action["front_time"] <= front.end
+                ):
+                    action = {"complete": False}
+            else:
+                size, detail, back = plan.stages[1:]
+                action = action_check(size.end, detail.start, detail.end, back.start, back.end)
+            if not action.get("complete", False):
+                failures.append("未确认走近、退回原位、背面、转回正面的完整顺序")
+    return list(dict.fromkeys(failures))

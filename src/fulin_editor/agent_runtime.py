@@ -7,7 +7,7 @@ from time import perf_counter
 from typing import Any, Callable, Protocol
 
 from .asr import source_fingerprint, transcribe_video
-from .planner import EditPlan, build_plan, load_sentences, validate_plan
+from .planner import EditPlan, build_plan, load_sentences, validate_plan, evidence_failures
 from .policies import POLICIES, RequestedProductType
 from .quality import inspect_output
 from .renderer import FrameSpec, probe_video, render_plan
@@ -15,7 +15,7 @@ from .vision import analyze_video
 
 
 AGENT_VERSION = "taobao-women-agent-v1"
-RULE_VERSION = "taobao-women-v3-2026-09-21"
+RULE_VERSION = "taobao-women-v4-2026-09-22"
 
 
 @dataclass(frozen=True)
@@ -239,9 +239,14 @@ class LocalEditingTools:
                 vision=vision.data["_native"],
                 product_type=product_type,
             )
-            return {"plan": plan.to_dict(), "_native": plan}
+            failures = evidence_failures(plan, sentences, vision.data["_native"])
+            return {"plan": plan.to_dict(), "_native": plan, "evidence_failures": failures}
 
-        return self._call("build_edit_plan", operation)
+        result = self._call("build_edit_plan", operation)
+        if result.ok and result.data["evidence_failures"]:
+            return ToolResult(False, "insufficient_evidence", "；".join(result.data["evidence_failures"]),
+                              result.data, elapsed_seconds=result.elapsed_seconds)
+        return result
 
     def validate_plan(self, plan: EditPlan, media: dict[str, Any]) -> ToolResult:
         def operation() -> dict[str, Any]:

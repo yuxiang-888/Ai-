@@ -105,7 +105,8 @@ def register_user(email: str, password: str, display_name: str = "") -> dict:
     password_hash = generate_password_hash(password)
     # A migrated database may already contain ordinary members from an older
     # build. The first enabled administrator still needs a safe bootstrap path.
-    role = "admin" if count_admins() == 0 else DEFAULT_ROLE
+    # Public registration never grants operations access. Existing owners grant it explicitly.
+    role = "admin" if count_admins() == 0 else "member"
     try:
         with connect() as connection:
             connection.execute(
@@ -232,3 +233,46 @@ def reset_user_password(user_id: str, new_password: str) -> None:
         )
         if cursor.rowcount != 1:
             raise LookupError("账号不存在")
+
+
+def update_user_access(
+    user_id: str,
+    *,
+    role: str | None = None,
+    enabled: bool | None = None,
+    actor_user_id: str = "",
+) -> dict:
+    """Update one account without allowing lockout of the last administrator."""
+
+    ensure_schema()
+    if role is not None and role not in {"admin", "member"}:
+        raise ValueError("权限只能设为负责人或成员")
+    with connect() as connection:
+        row = connection.execute("SELECT * FROM users WHERE id = ?", (str(user_id),)).fetchone()
+        if row is None:
+            raise LookupError("账号不存在")
+        current = dict(row)
+        next_role = role if role is not None else str(current["role"])
+        next_enabled = bool(enabled) if enabled is not None else bool(current["enabled"])
+        removes_admin = current["role"] == "admin" and bool(current["enabled"]) and (
+            next_role != "admin" or not next_enabled
+        )
+        if str(user_id) == str(actor_user_id) and (not next_enabled or next_role != "admin"):
+            raise ValueError("不能在当前会话中取消自己的负责人权限或停用自己")
+        if removes_admin:
+            count = connection.execute(
+                "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND enabled = 1"
+            ).fetchone()
+            if int(count["total"]) <= 1:
+                raise ValueError("至少需要保留一个已启用的负责人账号")
+        connection.execute(
+            "UPDATE users SET role = ?, enabled = ? WHERE id = ?",
+            (next_role, int(next_enabled), str(user_id)),
+        )
+    user = get_user(str(user_id)) if next_enabled else None
+    return user or {
+        "id": current["id"], "email": current["email"],
+        "display_name": current["display_name"], "role": next_role,
+        "enabled": False, "created_at": current["created_at"],
+        "last_login_at": current["last_login_at"],
+    }

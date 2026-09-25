@@ -19,8 +19,10 @@ class FrameSpec:
     full_body_scale: float = 0.96
     detail_scale: float = 1.12
     transition_seconds: float = 0.0
-    # JianYing's Y control is a position value, not independent vertical scale.
-    jianying_position_y_px: float = 500.0
+    # Legacy offset field retained for compatibility; Y=500 is not calibrated.
+    jianying_position_y_px: float = 0.0
+    jianying_y_requested: float = 500.0
+    jianying_y_status: str = "pending_calibration"
 
 
 @dataclass(frozen=True)
@@ -34,7 +36,7 @@ class RenderResult:
     fps: float
     video_codec: str
     audio_codec: str | None
-    jianying_position_y_px: float = 500.0
+    jianying_position_y_px: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +50,8 @@ class RenderResult:
             "video_codec": self.video_codec,
             "audio_codec": self.audio_codec,
             "jianying_position_y_px": self.jianying_position_y_px,
+            "jianying_y_requested": 500.0,
+            "jianying_y_status": "pending_calibration",
         }
 
 
